@@ -1,25 +1,39 @@
 {
   "expo": {
-    "name": "events-expo",
+    "name": "Events Live",
     "slug": "events-expo",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "orientation": "default",
+    "scheme": "events-expo",
+    "userInterfaceStyle": "dark",
+    "plugins": [
+      "expo-router",
+      "./plugins/withWebViewSslBypass",
+      "./plugins/withNetworkSecurityConfig"
+    ],
+    "android": {
+      "package": "com.example.eventslive",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ]
+    },
     "ios": {
+      "bundleIdentifier": "com.example.eventslive",
       "supportsTablet": true
     },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
-    },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "bundler": "metro",
+      "output": "static"
+    },
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9ec000e3-e20b-4aed-9273-64a2f3a575e4"
+      }
     }
   }
 }
