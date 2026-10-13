@@ -8,7 +8,8 @@
     "userInterfaceStyle": "dark",
     "plugins": [
       "expo-router",
-      "./plugins/withNetworkSecurityConfig"
+      "./plugins/withNetworkSecurityConfig",
+      "expo-web-browser"
     ],
     "android": {
       "package": "com.example.eventslive",

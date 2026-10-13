@@ -10,11 +10,12 @@ import {
   Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { fetchEvents, sortStreams } from '../../services/api';
 import { SportEvent, Stream } from '../../services/types';
 
 let WebView: any = null;
-if (Platform.OS !== 'web') {
+if (Platform.OS !== 'web' && Platform.OS !== 'android') {
   WebView = require('react-native-webview').WebView;
 }
 
@@ -22,51 +23,21 @@ if (Platform.OS !== 'web') {
 const PC_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-// 🎯 Referer fisso: il sito da cui provengono i link
+// 🎯 Referer fisso
 const REFERER = 'https://azione.direttecommunity.online/';
 
-// 💉 Script iniettato PRIMA del caricamento: maschera il WebView come Chrome
-const INJECT_SCRIPT_EARLY = `
-(function() {
-  try {
-    var realUA = 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
-    Object.defineProperty(navigator, 'userAgent', { get: function() { return realUA; }, configurable: true });
-    Object.defineProperty(navigator, 'appVersion', { get: function() { return realUA.replace('Mozilla/', ''); }, configurable: true });
-    Object.defineProperty(navigator, 'webdriver', { get: function() { return false; }, configurable: true });
-    if (!window.chrome) {
-      window.chrome = {
-        runtime: {},
-        loadTimes: function() { return {}; },
-        csi: function() { return {}; },
-        app: { isInstalled: false }
-      };
-    }
-    Object.defineProperty(navigator, 'plugins', { get: function() { return [1, 2, 3, 4, 5]; }, configurable: true });
-    Object.defineProperty(navigator, 'languages', { get: function() { return ['it-IT', 'it', 'en-US', 'en']; }, configurable: true });
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: function() { return 8; }, configurable: true });
-    Object.defineProperty(navigator, 'deviceMemory', { get: function() { return 8; }, configurable: true });
-    console.log('[NEXUS] WebView mascherato come Chrome');
-  } catch(e) { console.log('[NEXUS] Errore mascheramento:', e); }
-})();
-true;
-`;
-
-// 💉 Script iniettato DOPO il caricamento: video fullscreen + report
+// 💉 Script iniettato (solo per iOS e Web)
 const INJECT_SCRIPT = `
 (function() {
   if (window.__nexusInjected) return;
   window.__nexusInjected = true;
-  console.log('[NEXUS] Script installato su: ' + location.href);
 
-  // 🔒 Blocca popup
   try {
     window.open = function() { return null; };
     window.alert = function() {};
     window.confirm = function() { return false; };
-    window.prompt = function() { return null; };
   } catch(e) {}
 
-  // 🎨 Stili fullscreen + nascondi ads
   var applyStyles = function(doc) {
     try {
       if (!doc.head) return;
@@ -81,35 +52,19 @@ const INJECT_SCRIPT = `
           background: #000 !important;
           width: 100vw !important;
           height: 100vh !important;
-          min-height: 100vh !important;
         }
         video {
           object-fit: contain !important;
           width: 100vw !important;
           height: 100vh !important;
-          min-width: 100vw !important;
-          min-height: 100vh !important;
           position: fixed !important;
           top: 0 !important;
           left: 0 !important;
           z-index: 999999 !important;
           background: #000 !important;
-          display: block !important;
-          visibility: visible !important;
-          opacity: 1 !important;
         }
-        iframe.player, .player, [data-player], .video-js {
-          width: 100vw !important;
-          height: 100vh !important;
-          position: fixed !important;
-          top: 0 !important;
-          left: 0 !important;
-          z-index: 999998 !important;
-        }
-        .ad, .ads, .ad-container, .adsbygoogle,
-        [class*="ad-"], [id*="ad-"],
-        [class*="popup"], [id*="popup"],
-        [class*="banner"], [class*="overlay-ad"] {
+        .ad, .ads, .ad-container, [class*="ad-"], [id*="ad-"],
+        [class*="popup"], [id*="popup"], [class*="banner"] {
           display: none !important;
           opacity: 0 !important;
           pointer-events: none !important;
@@ -119,7 +74,6 @@ const INJECT_SCRIPT = `
     } catch(e) {}
   };
 
-  // 🎬 Forza play + inline
   var forcePlayback = function(doc) {
     try {
       applyStyles(doc);
@@ -128,17 +82,10 @@ const INJECT_SCRIPT = `
         var v = videos[i];
         v.setAttribute('playsinline', 'true');
         v.setAttribute('webkit-playsinline', 'true');
-        v.setAttribute('x5-playsinline', 'true');
-        v.setAttribute('preload', 'auto');
         v.muted = false;
         v.defaultMuted = false;
         v.volume = 1.0;
         v.controls = true;
-        v.style.display = 'block';
-        v.style.visibility = 'visible';
-        v.style.width = '100vw';
-        v.style.height = '100vh';
-        v.style.objectFit = 'contain';
         if (v.paused) {
           v.play().catch(function() {
             v.muted = true;
@@ -155,53 +102,8 @@ const INJECT_SCRIPT = `
     } catch(e) {}
   };
 
-  // 🖱️ Simula click sui play button
-  var simulateClick = function() {
-    try {
-      var selectors = [
-        'button', '[role="button"]', '.play', '.player-play',
-        '[data-play]', '.vjs-big-play-button', '.jw-icon-playback',
-        '[class*="play"]', '[id*="play"]'
-      ];
-      for (var i = 0; i < selectors.length; i++) {
-        try {
-          var els = document.querySelectorAll(selectors[i]);
-          for (var j = 0; j < els.length; j++) {
-            els[j].click();
-          }
-        } catch(e) {}
-      }
-    } catch(e) {}
-  };
-
   forcePlayback(document);
-  setTimeout(simulateClick, 2000);
-  setTimeout(simulateClick, 5000);
-  setTimeout(simulateClick, 10000);
-
   setInterval(function() { forcePlayback(document); }, 500);
-  setInterval(simulateClick, 3000);
-
-  // 🔍 REPORT: cosa c'è nella pagina
-  setTimeout(function() {
-    try {
-      var report = {
-        url: location.href,
-        videos: document.querySelectorAll('video').length,
-        iframes: document.querySelectorAll('iframe').length,
-        iframeSrcs: [],
-        buttons: document.querySelectorAll('button').length,
-        bodyHTML: document.body ? document.body.innerHTML.substring(0, 300) : 'no body'
-      };
-      var ifr = document.querySelectorAll('iframe');
-      for (var i = 0; i < ifr.length; i++) {
-        report.iframeSrcs.push(ifr[i].src || 'no-src');
-      }
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify(report));
-      }
-    } catch(e) {}
-  }, 3000);
 
   if (window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage('NEXUS_READY');
@@ -255,12 +157,26 @@ export default function PlayerScreen() {
     setWebviewError(null);
   };
 
+  // 🌐 Apri nel browser (Custom Tab su Android, browser su iOS)
   const openInBrowser = async () => {
     if (!currentStream) return;
     try {
-      await Linking.openURL(currentStream.url);
+      if (Platform.OS === 'android') {
+        await WebBrowser.openBrowserAsync(currentStream.url, {
+          toolbarColor: '#0d1117',
+          controlsColor: '#00d47e',
+          showTitle: true,
+          enableBarCollapsing: true,
+          showInRecents: false,
+        });
+      } else {
+        await Linking.openURL(currentStream.url);
+      }
     } catch (e) {
       console.error('Errore apertura browser:', e);
+      try {
+        await Linking.openURL(currentStream.url);
+      } catch {}
     }
   };
 
@@ -279,8 +195,40 @@ export default function PlayerScreen() {
 
     console.log('========== PLAYER ==========');
     console.log('[PLAYER] URL:', finalUrl);
-    console.log('[PLAYER] Referer:', REFERER);
+    console.log('[PLAYER] Platform:', Platform.OS);
     console.log('============================');
+
+    // 📱 ANDROID: pulsante "Guarda ora" con Chrome Custom Tab
+    if (Platform.OS === 'android') {
+      return (
+        <View style={styles.playerContainer}>
+          <View style={styles.androidPlayerOverlay}>
+            <Text style={styles.bigEmoji}>📺</Text>
+            <Text style={styles.title}>Pronto per guardare</Text>
+            <Text style={styles.subtitle}>
+              Tocca il pulsante qui sotto per aprire lo stream{'\n'}
+              in un player sicuro (Chrome in-app)
+            </Text>
+            <TouchableOpacity
+              style={styles.playButton}
+              onPress={openInBrowser}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.playButtonText}>▶  GUARDA ORA</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => {
+                setWebviewKey((k) => k + 1);
+                setWebviewError(null);
+              }}
+            >
+              <Text style={styles.secondaryButtonText}>🔄 Riprova</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
 
     // 🌐 WEB: iframe
     if (Platform.OS === 'web') {
@@ -304,6 +252,7 @@ export default function PlayerScreen() {
       );
     }
 
+    // 📱 iOS: WebView (funziona già)
     const headers: Record<string, string> = {
       'User-Agent': PC_USER_AGENT,
       'Referer': REFERER,
@@ -326,39 +275,30 @@ export default function PlayerScreen() {
           allowsFullscreenVideo
           mixedContentMode="always"
           scrollEnabled={false}
-          allowsBackForwardNavigationGestures={false}
           setSupportMultipleWindows={false}
           javaScriptCanOpenWindowsAutomatically={false}
           originWhitelist={['*']}
           onShouldStartLoadWithRequest={(req: any) => {
             const url: string = req.url || '';
-            console.log('[NAV]', req.navigationType, '→', url);
-
+            if (
+              url.startsWith('about:') ||
+              url.startsWith('data:') ||
+              url.startsWith('blob:') ||
+              url.startsWith('javascript:')
+            ) {
+              return true;
+            }
             if (
               url.startsWith('intent:') ||
               url.startsWith('market:') ||
               url.startsWith('whatsapp:') ||
               url.startsWith('tg:')
             ) {
-              console.log('[BLOCK SCHEMA]', url);
               return false;
             }
-
-            const BLOCKED = [
-              'doubleclick', 'googlesyndication', 'googleadservices',
-              'adservice', 'popads', 'propellerads', 'adsterra',
-              'exoclick', 'onclickads', 'popmyads', 'adcash',
-              'criteo', 'outbrain', 'taboola', 'mgid',
-            ];
-            const lower = url.toLowerCase();
-            if (BLOCKED.some((d) => lower.includes(d))) {
-              console.log('[BLOCK ADS]', url);
-              return false;
-            }
-
             return true;
           }}
-          injectedJavaScriptBeforeContentLoaded={INJECT_SCRIPT_EARLY}
+          injectedJavaScriptBeforeContentLoaded={INJECT_SCRIPT}
           injectedJavaScript={INJECT_SCRIPT}
           onMessage={(event: any) => {
             const msg = event?.nativeEvent?.data || '';
@@ -369,13 +309,9 @@ export default function PlayerScreen() {
             setWebviewLoading(true);
             setWebviewError(null);
           }}
-          onLoadProgress={({ nativeEvent }) => {
-            console.log('[LOAD PROGRESS]', Math.round(nativeEvent.progress * 100) + '%');
-          }}
           onLoadEnd={() => {
             console.log('[LOAD END]');
             setWebviewLoading(false);
-            webViewRef.current?.injectJavaScript(INJECT_SCRIPT);
           }}
           onError={(e: any) => {
             const msg = e.nativeEvent?.description || '';
@@ -384,13 +320,9 @@ export default function PlayerScreen() {
             setWebviewError(msg || 'Impossibile caricare lo stream');
           }}
           onHttpError={(e: any) => {
-            console.log('❌ HTTP ERROR:', e.nativeEvent?.statusCode, e.nativeEvent?.url);
             if (e.nativeEvent?.statusCode >= 400) {
               setWebviewError(`HTTP ${e.nativeEvent.statusCode}`);
             }
-          }}
-          onConsoleMessage={(e: any) => {
-            console.log('[WEBVIEW CONSOLE]', e.nativeEvent?.message);
           }}
         />
 
@@ -503,6 +435,7 @@ const styles = StyleSheet.create({
   },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   muted: { color: '#8b949e', fontSize: 13 },
+
   playerContainer: {
     width: '100%',
     aspectRatio: 16 / 9,
@@ -510,6 +443,58 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   webview: { flex: 1, backgroundColor: '#000' },
+
+  // Android: pulsante player
+  androidPlayerOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0d1117',
+    padding: 20,
+  },
+  bigEmoji: { fontSize: 64, marginBottom: 12 },
+  title: {
+    color: '#e6edf3',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  subtitle: {
+    color: '#8b949e',
+    fontSize: 13,
+    textAlign: 'center',
+    paddingHorizontal: 30,
+    marginBottom: 24,
+    lineHeight: 18,
+  },
+  playButton: {
+    backgroundColor: '#00d47e',
+    paddingHorizontal: 40,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  playButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  secondaryButton: {
+    backgroundColor: '#161b22',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2d333b',
+  },
+  secondaryButtonText: {
+    color: '#8b949e',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
   overlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
@@ -534,6 +519,7 @@ const styles = StyleSheet.create({
   },
   browserButton: { backgroundColor: '#1f6feb' },
   retryText: { color: '#fff', fontWeight: '700' },
+
   info: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -553,6 +539,7 @@ const styles = StyleSheet.create({
     borderColor: '#1f6feb55',
   },
   browserPillText: { color: '#79b8ff', fontSize: 12, fontWeight: '700' },
+
   streamItem: {
     flexDirection: 'row',
     alignItems: 'center',
