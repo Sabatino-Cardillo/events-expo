@@ -15,7 +15,7 @@ import { fetchEvents, sortStreams } from '../../services/api';
 import { SportEvent, Stream } from '../../services/types';
 
 let WebView: any = null;
-if (Platform.OS !== 'web' && Platform.OS !== 'android') {
+if (Platform.OS !== 'web') {
   WebView = require('react-native-webview').WebView;
 }
 
@@ -25,8 +25,18 @@ const PC_USER_AGENT =
 
 // 🎯 Referer fisso
 const REFERER = 'https://azione.direttecommunity.online/';
+const TRACKING_DOMAIN = 'rise-u.vip';
 
-// 💉 Script iniettato (solo per iOS e Web)
+function isTrackingUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === TRACKING_DOMAIN || hostname.endsWith(`.${TRACKING_DOMAIN}`);
+  } catch {
+    return false;
+  }
+}
+
+// 💉 Script iniettato per forzare il video player e rimuovere gli annunci
 const INJECT_SCRIPT = `
 (function() {
   if (window.__nexusInjected) return;
@@ -67,6 +77,9 @@ const INJECT_SCRIPT = `
         [class*="popup"], [id*="popup"], [class*="banner"] {
           display: none !important;
           opacity: 0 !important;
+          pointer-events: none !important;
+        }
+        a[href*="rise-u.vip"] {
           pointer-events: none !important;
         }
       \`;
@@ -157,7 +170,6 @@ export default function PlayerScreen() {
     setWebviewError(null);
   };
 
-  // 🌐 Apri nel browser (Custom Tab su Android, browser su iOS)
   const openInBrowser = async () => {
     if (!currentStream) return;
     try {
@@ -193,43 +205,6 @@ export default function PlayerScreen() {
 
     const finalUrl = currentStream.url;
 
-    console.log('========== PLAYER ==========');
-    console.log('[PLAYER] URL:', finalUrl);
-    console.log('[PLAYER] Platform:', Platform.OS);
-    console.log('============================');
-
-    // 📱 ANDROID: pulsante "Guarda ora" con Chrome Custom Tab
-    if (Platform.OS === 'android') {
-      return (
-        <View style={styles.playerContainer}>
-          <View style={styles.androidPlayerOverlay}>
-            <Text style={styles.bigEmoji}>📺</Text>
-            <Text style={styles.title}>Pronto per guardare</Text>
-            <Text style={styles.subtitle}>
-              Tocca il pulsante qui sotto per aprire lo stream{'\n'}
-              in un player sicuro (Chrome in-app)
-            </Text>
-            <TouchableOpacity
-              style={styles.playButton}
-              onPress={openInBrowser}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.playButtonText}>▶  GUARDA ORA</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => {
-                setWebviewKey((k) => k + 1);
-                setWebviewError(null);
-              }}
-            >
-              <Text style={styles.secondaryButtonText}>🔄 Riprova</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      );
-    }
-
     // 🌐 WEB: iframe
     if (Platform.OS === 'web') {
       return (
@@ -252,11 +227,11 @@ export default function PlayerScreen() {
       );
     }
 
-    // 📱 iOS: WebView (funziona già)
-    const headers: Record<string, string> = {
-      'User-Agent': PC_USER_AGENT,
-      'Referer': REFERER,
-    };
+    // 📱 iOS & ANDROID: WebView con configurazioni ottimizzate per evitare lo schermo nero
+    const headers: Record<string, string> = { Referer: REFERER };
+    if (Platform.OS === 'ios') {
+      headers['User-Agent'] = PC_USER_AGENT;
+    }
 
     return (
       <View style={styles.playerContainer}>
@@ -265,19 +240,20 @@ export default function PlayerScreen() {
           ref={webViewRef}
           source={{ uri: finalUrl, headers }}
           style={styles.webview}
-          userAgent={PC_USER_AGENT}
-          javaScriptEnabled
-          domStorageEnabled
-          thirdPartyCookiesEnabled
-          sharedCookiesEnabled
-          allowsInlineMediaPlayback
+          userAgent={Platform.OS === 'ios' ? PC_USER_AGENT : undefined}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          thirdPartyCookiesEnabled={true}
+          sharedCookiesEnabled={true}
+          allowsInlineMediaPlayback={true}
           mediaPlaybackRequiresUserAction={false}
-          allowsFullscreenVideo
+          allowsFullscreenVideo={true}
           mixedContentMode="always"
           scrollEnabled={false}
           setSupportMultipleWindows={false}
           javaScriptCanOpenWindowsAutomatically={false}
           originWhitelist={['*']}
+          androidLayerType="hardware"
           onShouldStartLoadWithRequest={(req: any) => {
             const url: string = req.url || '';
             if (
@@ -287,6 +263,10 @@ export default function PlayerScreen() {
               url.startsWith('javascript:')
             ) {
               return true;
+            }
+            if (isTrackingUrl(url)) {
+              console.warn('[WEBVIEW] Navigazione tracker bloccata:', url);
+              return false;
             }
             if (
               url.startsWith('intent:') ||
@@ -305,17 +285,14 @@ export default function PlayerScreen() {
             console.log('[WEBVIEW MSG]', msg);
           }}
           onLoadStart={() => {
-            console.log('[LOAD START]', finalUrl);
             setWebviewLoading(true);
             setWebviewError(null);
           }}
           onLoadEnd={() => {
-            console.log('[LOAD END]');
             setWebviewLoading(false);
           }}
           onError={(e: any) => {
             const msg = e.nativeEvent?.description || '';
-            console.log('❌ WEBVIEW ERROR:', msg);
             setWebviewLoading(false);
             setWebviewError(msg || 'Impossibile caricare lo stream');
           }}
@@ -444,59 +421,8 @@ const styles = StyleSheet.create({
   },
   webview: { flex: 1, backgroundColor: '#000' },
 
-  // Android: pulsante player
-  androidPlayerOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#0d1117',
-    padding: 20,
-  },
-  bigEmoji: { fontSize: 64, marginBottom: 12 },
-  title: {
-    color: '#e6edf3',
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  subtitle: {
-    color: '#8b949e',
-    fontSize: 13,
-    textAlign: 'center',
-    paddingHorizontal: 30,
-    marginBottom: 24,
-    lineHeight: 18,
-  },
-  playButton: {
-    backgroundColor: '#00d47e',
-    paddingHorizontal: 40,
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  playButtonText: {
-    color: '#000',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  secondaryButton: {
-    backgroundColor: '#161b22',
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#2d333b',
-  },
-  secondaryButtonText: {
-    color: '#8b949e',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.85)',

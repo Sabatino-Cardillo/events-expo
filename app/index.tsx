@@ -202,8 +202,24 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    loadEvents();
-  }, [loadEvents]);
+    let active = true;
+    fetchEvents()
+      .then((data) => {
+        if (active) setEvents(data);
+      })
+      .catch((e: unknown) => {
+        if (active) {
+          setError(e instanceof Error ? e.message : 'Errore di rete');
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // 🔍 Ricerca globale: se c'è del testo, mostro una lista piatta
   const isSearching = search.trim().length > 0;
@@ -371,7 +387,7 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={styles.container} autoFocus>
+    <View style={styles.container}>
       {/* 🔍 BARRA DI RICERCA FISSA IN ALTO */}
       <View style={styles.searchWrap}>
         <TextInput
@@ -412,7 +428,9 @@ export default function HomeScreen() {
           renderItem={renderRow}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
-            <Text style={styles.empty}>Nessun risultato per "{search}"</Text>
+            <Text style={styles.empty}>
+              Nessun risultato per &quot;{search}&quot;
+            </Text>
           }
         />
       ) : (
